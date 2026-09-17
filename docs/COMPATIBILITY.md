@@ -4,6 +4,17 @@ This document is the engineering ground truth for SETBD Cloner. It exists becaus
 
 ---
 
+## 0.-1 v1.3.0 core-engine update (crash containment, BlackBox parity)
+
+Engine hardening informed by the BlackBox virtual engine (top.niunaijun) architecture — the reference for what a non-root, single-process container can reliably do:
+
+- **Guest lifecycle crash containment.** A guest app runs inside the host process, so previously ANY uncaught exception in a guest lifecycle callback killed the entire cloner (host UI + every clone). Every Instrumentation lifecycle callback (`onCreate/onStart/onResume/onPause/onStop/onDestroy/onNewIntent/onSaveInstanceState/…`) is now contained: a crash during onCreate swaps that activity to a readable error screen; a crash in later callbacks is logged and skipped. **The host process can no longer be killed by guest code in the activity path.**
+- **Guest ActivityInfo identity (BlackBox `checkActivity` parity).** The activity's `mActivityInfo` is swapped to the GUEST's declaration — theme, orientation, soft-input mode and `getActivityInfo()` now resolve exactly as the guest manifest declared them, not as the stub's.
+- **Hook re-assertion (BlackBox `checkEnv` parity).** Both framework hooks (ActivityThread instrumentation, IActivityManager/IActivityTaskManager singletons) are re-verified on every guest activity create; a silently-refreshed binder singleton can no longer strand in-guest navigation.
+- **Android 12+ attribution parity.** The virtual context reports a null attribution tag so guest code never presents host-process attribution.
+- **Multi-clone intent routing fix.** With two clones of the SAME app, guest-initiated `startActivity` now routes to the clone that actually has live activities — previously it could land in the wrong clone.
+- **On-device crash forensics.** A global crash handler writes the full stack trace plus the last 200 engine log lines to `files/setbd-crash.log` before the process goes down — failures are now diagnosable without adb/logcat.
+
 ## 0.0 v1.2.1 core-engine update (Android 10+ dex policy)
 
 - **Writable-dex enforcement.** Android 10 (API 29) hardened ART: apps targeting API 29+ may no longer execute DEX from a **writable** file — `PathClassLoader` fails with *"Writable dex file '…' is not allowed"*. Every guest APK (base + all splits) is now flipped to read-only (mode 0444) at import time **and** re-enforced at every runtime build. The launch-time enforcement is idempotent and heals clones imported by older versions **in place** — existing clones launch again without re-importing the app. The check ART performs is on the file's permission bits, not its location, so a read-only APK inside the app's private storage is fully compliant.

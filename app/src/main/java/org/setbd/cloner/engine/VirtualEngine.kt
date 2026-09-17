@@ -177,12 +177,33 @@ class VirtualEngine private constructor() {
         return runtime to guestClassName
     }
 
+    /**
+     * Resolves a stub wrapper intent to (runtime, guest class) WITHOUT
+     * side effects. Used by the per-callback containment in the
+     * instrumentation hook, which fires far more often than the single
+     * launch-time resolution — repeated lifecycle reports would spam the
+     * lifecycle journal and the blocking recovery path must not re-run.
+     */
+    fun peekGuestLaunch(intent: Intent): Pair<GuestRuntime, String>? {
+        if (!intent.hasExtra(ExtraKeys.GUEST_INTENT)) return null
+        val runtime = runtimes[intent.getLongExtra(ExtraKeys.CLONE_ID, -1L)] ?: return null
+        val guestClassName = runtime.unwrapLaunch(intent)?.first ?: return null
+        return runtime to guestClassName
+    }
+
     /** ActivityManagerHook: rewrites guest-initiated startActivity calls. */
     fun remapIfGuestIntent(intent: Intent): Intent? {
         if (intent.hasExtra(ExtraKeys.GUEST_INTENT)) return null // already a wrapper
         val component = intent.component ?: return null
-        val runtime = runtimes.values.firstOrNull { it.packageName == component.packageName }
-            ?: return null
+        val candidates = runtimes.values.filter { it.packageName == component.packageName }
+        val runtime = when (candidates.size) {
+            0 -> return null
+            1 -> candidates[0]
+            // Two clones of the SAME app: route the intent to whichever
+            // actually has live activities, never to an arbitrary one.
+            else -> candidates.maxByOrNull { it.activityCount.get() }
+                ?: candidates.first()
+        }
         if (runtime.componentEnabledSetting(component) ==
             android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
         ) {
@@ -223,6 +244,18 @@ class VirtualEngine private constructor() {
     fun reportRuntimeError(runtime: GuestRuntime, t: Throwable) {
         lifecycleManager.report(runtime.cloneId, CloneLifecycle.ERROR)
         ClonerLog.e(TAG, "clone=${runtime.cloneId} runtime error", t)
+    }
+
+    /**
+     * Re-asserts both framework hooks (BlackBox checkEnv parity). SDKs or
+     * framework paths may refresh the ActivityThread instrumentation or the
+     * AMS singletons; every guest activity create re-verifies them, so a
+     * silently-lost hook can never strand a launch mid-container.
+     */
+    fun ensureHooks() {
+        if (!HiddenApiUnlock.unlocked) HiddenApiUnlock.unlock()
+        replaceInstrumentation() // idempotent — no-ops when already ours
+        ActivityManagerHook.verify()
     }
 
     companion object {

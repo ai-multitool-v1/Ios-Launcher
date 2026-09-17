@@ -32,12 +32,22 @@ object ActivityManagerHook {
         private set
 
     fun install() {
-        if (installed) return
-        var ok = false
-        ok = hookSingleton("android.app.ActivityManager", "IActivityManagerSingleton") || ok
-        ok = hookSingleton("android.app.ActivityTaskManager", "IActivityTaskManagerSingleton") || ok
-        installed = ok
-        ClonerLog.i(TAG, "activity manager hook installed=$ok")
+        val am = hookSingleton("android.app.ActivityManager", "IActivityManagerSingleton")
+        val atm = hookSingleton("android.app.ActivityTaskManager", "IActivityTaskManagerSingleton")
+        installed = am || atm
+        if (installed) {
+            ClonerLog.i(TAG, "activity manager hook installed (am=$am atm=$atm)")
+        }
+    }
+
+    /**
+     * Re-checks that both binder singletons still carry our proxy
+     * (BlackBox checkEnv parity). A framework path that refreshed a
+     * singleton drops the rewrite silently — re-hook immediately.
+     */
+    fun verify() {
+        hookSingleton("android.app.ActivityManager", "IActivityManagerSingleton")
+        hookSingleton("android.app.ActivityTaskManager", "IActivityTaskManagerSingleton")
     }
 
     private fun hookSingleton(holderClass: String, fieldName: String): Boolean {
@@ -51,7 +61,6 @@ object ActivityManagerHook {
             mInstanceField.isAccessible = true
             val original = mInstanceField.get(singleton) ?: return false
             if (Proxy.isProxyClass(original.javaClass)) return true // already hooked
-
             val iface = original.javaClass.interfaces.firstOrNull {
                 it.name.endsWith("IActivityManager") || it.name.endsWith("IActivityTaskManager")
             } ?: Class.forName(

@@ -53,6 +53,13 @@ class VirtualContext(
 
     override fun getApplicationInfo() = runtime.guestApplicationInfo
 
+    /**
+     * Android 12+ attribution parity (BlackBox ContextCompat.fix): guest
+     * code must never present an attribution tag of the host process —
+     * null means "attribution belongs to the (guest) package name".
+     */
+    override fun getAttributionTag(): String? = null
+
     override fun getPackageManager() = runtime.virtualPackageManager
 
     override fun getClassLoader(): ClassLoader = runtime.classLoader
