@@ -12,10 +12,10 @@ plugins {
 // secrets). Local builds fall back to the debug key so `assembleRelease`
 // always succeeds on a developer machine.
 // ---------------------------------------------------------------------------
-val keystorePath: String? = System.getenv("ANDROID_KEYSTORE_PATH")
-val keystorePassword: String? = System.getenv("ANDROID_KEYSTORE_PASSWORD")
-val keyAlias: String? = System.getenv("ANDROID_KEY_ALIAS")
-val keyPassword: String? = System.getenv("ANDROID_KEY_PASSWORD")
+val keystoreFilePath: String? = System.getenv("ANDROID_KEYSTORE_PATH")
+val keystoreStorePass: String? = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val keystoreKeyAlias: String? = System.getenv("ANDROID_KEY_ALIAS")
+val keystoreKeyPass: String? = System.getenv("ANDROID_KEY_PASSWORD")
 
 android {
     namespace = "org.setbd.cloner"
@@ -36,12 +36,12 @@ android {
     }
 
     signingConfigs {
-        if (keystorePath != null && keystorePassword != null) {
+        if (keystoreFilePath != null && keystoreStorePass != null) {
             create("release") {
-                storeFile = rootProject.file(keystorePath)
-                storePassword = keystorePassword
-                keyAlias = keyAlias
-                keyPassword = keyPassword
+                storeFile = rootProject.file(keystoreFilePath)
+                storePassword = keystoreStorePass
+                keyAlias = keystoreKeyAlias
+                keyPassword = keystoreKeyPass
             }
         }
     }
@@ -53,7 +53,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            if (keystorePath != null && keystorePassword != null) {
+            if (keystoreFilePath != null && keystoreStorePass != null) {
                 signingConfig = signingConfigs.getByName("release")
             } else {
                 // Local fallback: sign the release artifact with the debug key.
