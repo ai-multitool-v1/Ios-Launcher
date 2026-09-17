@@ -4,6 +4,15 @@ This document is the engineering ground truth for SETBD Cloner. It exists becaus
 
 ---
 
+## 0.-2 v1.4.0 core-engine update (guest ContentProviders, the "opens then instantly closes" fix)
+
+Round of deep file-by-file comparison against the BlackBox engine (user-directed), fixing the single largest real-app compatibility gap in the previous architecture:
+
+- **Guest ContentProviders are now installed (BlackBox `installProvider` parity).** Modern AndroidX apps initialize WorkManager, Firebase, emoji2, ProfileInstaller and Lifecycle through `androidx.startup`'s InitializationProvider — a ContentProvider. The engine previously skipped provider installation entirely, so those subsystems stayed uninitialized and guests crashed or self-exited moments after opening. The engine now installs every guest-declared provider through the platform's own `ActivityThread.installProvider` (reflection), BEFORE `Application.onCreate`, in the platform's order. `ContentResolver` then resolves those authorities locally in the host process. An authority registry refuses cross-clone authority collisions (second clone of the same app degrades gracefully) and known anti-virtualization SDK providers are skipped (BlackBox parity).
+- **Per-clone WebView data suffix (Android 9+).** `WebView.setDataDirectorySuffix("clone_<id>")` is set before each guest boots — multiple WebView-using clones in one process no longer collide on the default directory (another frequent silent-exit cause).
+- **StrictMode relaxation for legacy guests** (targetSdk < N): the network-permitting policy is applied so old apps' own StrictMode checks cannot kill them inside our process.
+- **"Auto-exit" forensics.** The two remaining paths that can legitimately bounce a user back (stub reached without mapping / guest activity class failing to instantiate) now carry the EXACT reason into the on-screen toast and the engine breadcrumb log (`newActivity: no guest mapping…`, `guest activity instantiation failed: <class> (<exception>)`), plus step-by-step launch breadcrumbs in LaunchCoordinator. Any remaining failure is now precisely diagnosable from the report file or a toast description.
+
 ## 0.-1 v1.3.0 core-engine update (crash containment, BlackBox parity)
 
 Engine hardening informed by the BlackBox virtual engine (top.niunaijun) architecture — the reference for what a non-root, single-process container can reliably do:

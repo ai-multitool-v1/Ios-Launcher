@@ -94,6 +94,14 @@ class GuestRuntime(
     var guestApplication: Application? = null
         private set
 
+    /**
+     * ContentProviders the guest declares (framework archive parse). Empty
+     * when the guest declares none or the archive metadata is unavailable —
+     * [GuestProviderInstaller] treats both the same.
+     */
+    val guestProviders: List<android.content.pm.ProviderInfo>
+        get() = packageInfo?.providers?.filterNotNull().orEmpty()
+
     val virtualPackageManager: VirtualPackageManager by lazy {
         VirtualPackageManager(this, hostContext.packageManager, hostContext.packageName)
     }
@@ -114,7 +122,7 @@ class GuestRuntime(
             pm.getPackageArchiveInfo(
                 apkPath,
                 PackageManager.GET_META_DATA or PackageManager.GET_SIGNATURES or
-                    PackageManager.GET_ACTIVITIES
+                    PackageManager.GET_ACTIVITIES or PackageManager.GET_PROVIDERS
             )
         }.getOrNull()
         if (packageInfo == null) {
@@ -330,9 +338,33 @@ class GuestRuntime(
         if (guestApplication != null) return guestApplication
         val appClassName = manifest.applicationClassName ?: return null
         return try {
+            // Per-clone WebView data namespace (Android 9+). Without a suffix
+            // every WebView-using clone in this process collides on one
+            // default directory — a frequent silent self-exit cause.
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                runCatching {
+                    android.webkit.WebView.setDataDirectorySuffix("clone_${cloneId}")
+                }.onFailure { ClonerLog.w(TAG, "webview suffix unavailable", it) }
+            }
             val instrumentation = android.app.Instrumentation()
             val context = VirtualContext(hostContext.applicationContext, this)
             val app = instrumentation.newApplication(classLoader, appClassName, context)
+            // Providers go in BEFORE onCreate (platform order): androidx.startup,
+            // WorkManager and friends must be queryable when the app boots.
+            val providerCount = GuestProviderInstaller.installAll(this, context)
+            ClonerLog.i(TAG, "guest providers installed=$providerCount (clone=$cloneId)")
+            // Old guests assumed permissive I/O rules; relax the policy so
+            // their own StrictMode checks cannot kill them in our process.
+            val guestTargetSdk = packageInfo?.applicationInfo?.targetSdkVersion ?: 0
+            if (guestTargetSdk < android.os.Build.VERSION_CODES.N) {
+                runCatching {
+                    android.os.StrictMode.setThreadPolicy(
+                        android.os.StrictMode.ThreadPolicy.Builder(
+                            android.os.StrictMode.getThreadPolicy()
+                        ).permitNetwork().build()
+                    )
+                }
+            }
             instrumentation.callApplicationOnCreate(app)
             guestApplication = app
             ClonerLog.i(TAG, "guest application initialized: $appClassName (clone=$cloneId)")

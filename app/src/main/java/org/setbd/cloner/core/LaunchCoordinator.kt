@@ -46,11 +46,24 @@ class LaunchCoordinator(
         repository.markLaunched(clone.cloneId)
 
         return try {
+            ClonerLog.i(TAG, "launch start clone=${clone.cloneId} pkg=${clone.originalPackageName}")
             val runtime = engine.ensureRuntime(clone)
+            ClonerLog.i(
+                TAG,
+                "runtime ready clone=${clone.cloneId} launcher=${runtime.launcherActivityClassName} " +
+                    "apks=${runtime.allApkPaths.size} providers=${runtime.guestProviders.size}"
+            )
             val guestApplication = runtime.createGuestApplication()
+            if (guestApplication == null) {
+                ClonerLog.w(TAG, "guest application DEGRADED clone=${clone.cloneId} (continuing without it)")
+            }
             repository.markDegraded(clone.cloneId, guestApplication == null)
 
             val wrapper = runtime.buildStubIntent(runtime.guestLaunchIntent())
+            ClonerLog.i(
+                TAG,
+                "stub intent built clone=${clone.cloneId} stub=${wrapper.component} guest=${wrapper.getStringExtra(org.setbd.cloner.engine.stub.ExtraKeys.GUEST_CLASS)}"
+            )
             context.startActivity(wrapper)
             ClonerLog.i(TAG, "clone=${clone.cloneId} (${clone.originalPackageName}) launched in container")
             LaunchResult.Started

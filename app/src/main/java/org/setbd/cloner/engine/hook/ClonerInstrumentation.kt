@@ -17,6 +17,7 @@ import org.setbd.cloner.engine.VirtualEngine
 import org.setbd.cloner.engine.guest.GuestRuntime
 import org.setbd.cloner.engine.guest.VirtualContext
 import org.setbd.cloner.engine.stub.ExtraKeys
+import org.setbd.cloner.engine.stub.StubActivity
 import org.setbd.cloner.util.ClonerLog
 
 /**
@@ -56,6 +57,11 @@ class ClonerInstrumentation : Instrumentation() {
     override fun newActivity(cl: ClassLoader?, className: String?, intent: Intent?): Activity {
         val launch = intent?.let { engine.resolveStubLaunch(it) }
         if (launch == null) {
+            ClonerLog.w(
+                TAG,
+                "newActivity: no guest mapping for $className — stub will explain " +
+                    "(component=${intent?.component}, hasWrapper=${intent?.hasExtra(ExtraKeys.GUEST_INTENT)})"
+            )
             return super.newActivity(cl, className, intent)
         }
         val (runtime, guestClassName) = launch
@@ -69,7 +75,9 @@ class ClonerInstrumentation : Instrumentation() {
             runtime.activityCount.decrementAndGet()
             ClonerLog.e(TAG, "guest activity instantiation failed: $guestClassName", t)
             engine.reportRuntimeError(runtime, t)
-            // Fall back to the stub class, which finishes itself safely.
+            // The stub fallback finishes itself — make it carry the real reason.
+            StubActivity.pendingDiagnostics =
+                "$guestClassName (${t.javaClass.simpleName}: ${t.message?.take(120) ?: "unknown"})"
             super.newActivity(cl, className, intent)
         }
     }
