@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Guest clone data is never backed up: it belongs to virtualized apps
+         and may contain their private state. -->
+    <exclude domain="sharedpref" path="." />
+</full-backup-content>

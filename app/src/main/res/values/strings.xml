@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SETBD Cloner</string>
+    <string name="developer_credit">Developed by SETBD</string>
+    <string name="splash_tagline">Parallel apps. One device.</string>
+</resources>

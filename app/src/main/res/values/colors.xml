@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Kept from the original SETBD Launcher mark (per project hand-over). -->
+    <color name="ic_launcher_background">#101324</color>
+
+    <!-- Brand palette derived from the launcher mark. -->
+    <color name="brand_navy">#101324</color>
+    <color name="brand_surface_dark">#171B30</color>
+    <color name="brand_accent">#7FB5FF</color>
+    <color name="brand_accent_cell">#6FD3F2</color>
+</resources>

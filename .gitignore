@@ -1,0 +1,26 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+captures/
+.cxx/
+*.log
+
+# Signing (never commit keys)
+*.keystore
+*.jks
+keystore.properties
+.kotlin/
+keystore-backup/
