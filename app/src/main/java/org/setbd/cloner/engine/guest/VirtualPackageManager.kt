@@ -55,7 +55,10 @@ class VirtualPackageManager(
 
     @Throws(NameNotFoundException::class)
     override fun getPackageInfo(packageName: String, flags: Int): PackageInfo {
-        if (packageName == guestPackage) return runtime.packageInfo
+        if (packageName == guestPackage) {
+            return runtime.packageInfo
+                ?: throw NameNotFoundException("guest $packageName metadata unavailable")
+        }
         return host.getPackageInfo(packageName, flags)
     }
 

@@ -28,9 +28,14 @@ object ManifestParser {
         val applicationClassName: String?,
         val labelRes: Int,
         val iconRes: Int,
+        /** Application-level theme (android:theme on <application>). */
+        val applicationThemeRes: Int,
         val activities: List<GuestActivity>
     ) {
         val launcherActivity: GuestActivity? get() = activities.firstOrNull { it.isLauncher }
+
+        /** First declared activity — fallback when no MAIN/LAUNCHER filter exists. */
+        val firstActivity: GuestActivity? get() = activities.firstOrNull()
     }
 
     fun parse(apkPath: String, manifestPackage: String): ManifestData? {
@@ -50,6 +55,7 @@ object ManifestParser {
         var applicationClassName: String? = null
         var labelRes = 0
         var iconRes = 0
+        var applicationThemeRes = 0
         val activities = ArrayList<GuestActivity>()
 
         var currentActivity: String? = null
@@ -67,6 +73,7 @@ object ManifestParser {
                         applicationClassName = stringAttr(parser, ANDROID_NAME)?.let { resolveClass(it, manifestPackage) }
                         labelRes = resourceAttr(parser, ANDROID_LABEL)
                         iconRes = resourceAttr(parser, ANDROID_ICON)
+                        applicationThemeRes = resourceAttr(parser, ANDROID_THEME)
                     }
                     "activity", "activity-alias" -> {
                         currentActivity = stringAttr(parser, ANDROID_NAME)?.let { resolveClass(it, manifestPackage) }
@@ -120,7 +127,7 @@ object ManifestParser {
             event = parser.next()
         }
 
-        return ManifestData(applicationClassName, labelRes, iconRes, activities)
+        return ManifestData(applicationClassName, labelRes, iconRes, applicationThemeRes, activities)
     }
 
     private fun resolveClass(name: String, manifestPackage: String): String =

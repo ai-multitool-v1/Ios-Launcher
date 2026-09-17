@@ -1,8 +1,15 @@
 # Android Compatibility & Limitation Analysis
 
-This document is the engineering ground truth for SETBD Cloner v1. It exists because the project explicitly refuses to fake APIs: everything below describes what a **normal, non-privileged, non-root Android application** can actually do when running third-party apps inside its own process — and where the hard platform boundaries are.
+This document is the engineering ground truth for SETBD Cloner. It exists because the project explicitly refuses to fake APIs: everything below describes what a **normal, non-privileged, non-root Android application** can actually do when running third-party apps inside its own process — and where the hard platform boundaries are.
 
 ---
+
+## 0. v1.1 core-engine update
+
+- **Split-APK (App Bundle) support.** Installed App Bundle packages are imported as base + **all** split APKs (`split_config.*.abi/density/language`); splits are copied into the clone namespace and loaded together with the base (joined dex path, joined asset paths, zip-embedded native-lib lookup). `.xapk` / `.apks` / `.apkm` bundles picked from storage are unpacked and imported the same way.
+- **Permission battery.** The host declares and batch-requests every grantable runtime permission; guests run inside the host process and inherit the grants (camera, microphone, location, storage/media, contacts, telephony, SMS, Bluetooth, sensors, notifications…).
+- **Robustness.** Archive-metadata parse failures no longer abort a launch (manifest-only mode), missing MAIN/LAUNCHER filters fall back to the first declared activity, guest activities without an explicit theme inherit the guest application theme, and runtimes are rebuilt from the registry after process death (Recents keeps working).
+- **Storage redirection hardening.** Guest `openFileInput/openFileOutput/deleteFile/fileList/getDataDir` now target the clone namespace — previously file-stream writes leaked to the host directory.
 
 ## 1. What Android allows a normal app to do
 
@@ -10,8 +17,9 @@ This document is the engineering ground truth for SETBD Cloner v1. It exists bec
 |---|---|---|
 | Enumerate installed apps | `PackageManager.getInstalledPackages` + `QUERY_ALL_PACKAGES` | ✅ documented API |
 | Read app label / icon / version / permissions | `getPackageArchiveInfo`, `ApplicationInfo` | ✅ documented API |
-| Read & copy the base APK of an installed app | `ApplicationInfo.sourceDir` (world-readable by design) | ✅ works without privileges |
-| Load foreign dex code in-process | `PathClassLoader` / `DexClassLoader` | ✅ documented API |
+| Read & copy base APK + ALL split APKs of an installed app | `ApplicationInfo.sourceDir` / `splitSourceDirs` (world-readable by design, copied — never moved) | ✅ works without privileges |
+| Import `.xapk` / `.apks` / `.apkm` bundles | ZIP extraction (`java.util.zip.ZipFile`) → base + splits staged into the clone namespace | ✅ documented API |
+| Load foreign dex code in-process | `PathClassLoader` with base+splits joined on one dex path | ✅ documented API |
 | Attach foreign resources | `AssetManager.addAssetPath` (hidden; via `VMRuntime.setHiddenApiExemptions("L")` using the LSPosed `hiddenapibypass` library) | ⚠️ hidden-API dependent, see §4 |
 | Map guest components onto declared stub components | host manifest stubs + instrumentation hook | ⚠️ internal, process-local |
 | Redirect "own storage" paths per clone | `ContextWrapper` overrides (`getFilesDir`, `getCacheDir`, `openOrCreateDatabase`, …) | ✅ regular subclassing |
@@ -30,19 +38,18 @@ These are **kernel / system-server boundaries**. No amount of clever user-space 
 - **Spoofing device identity to satisfy integrity checks.** Play Integrity, SafetyNet, DRM (Widevine), attestation and bank-app hardening detect or reject container environments. We do not try to defeat them, and this project will never add code that does.
 - **Multiple login for apps whose servers bind state to device identity** — even a perfect client-side container cannot force the server to allow it.
 
-## 3. App categories that cannot be virtualized (v1)
+## 3. App categories that cannot be virtualized (or run reduced)
 
-| Category | Reason |
+| Category | Status |
 |---|---|
-| Split-APK / App Bundle apps (most Play-installed modern apps with dynamic features) | base APK alone is incomplete; rejected at import with an explicit reason |
+| Split-APK / App Bundle apps | ✅ **supported since v1.1** (base + splits imported & loaded together) |
 | Apps with signature / integrity verification (WhatsApp, banking apps, some games) | detect the container, refuse to run or fail |
-| Apps whose classes live in config splits | class-not-found inside the container |
 | Apps relying on their own `ContentProvider` auto-init (Firebase-init style) | providers are not virtualized; app runs degraded or crashes — surfaced in Clone Info |
-| Apps using foreground services heavily | services are not virtualized in v1 |
+| Apps using foreground services heavily | services are not virtualized |
 | Apps with native libraries requiring their own process name / `/proc` identity | process identity remains `org.setbd.cloner` |
 | Multi-user / work-profile-dependent apps | obviously out of scope |
 
-Simple, monolithic-APK apps (tools, launchers, note apps, many offline games, older messengers without integrity checks) are the sweet spot for v1.
+Simple monolithic and App Bundle apps (tools, launchers, note apps, many offline games, older messengers without integrity checks) are the sweet spot.
 
 ## 4. Android version-specific notes
 

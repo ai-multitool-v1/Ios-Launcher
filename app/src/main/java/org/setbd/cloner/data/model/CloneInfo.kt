@@ -13,8 +13,15 @@ data class CloneInfo(
     val appLabel: String,
     /** User assigned name (defaults to a generated "App N" style label). */
     val displayName: String,
-    /** Path of the cloned APK copy stored inside the clone's private area. */
+    /** Path of the cloned base APK copy stored inside the clone's private area. */
     val apkPath: String,
+    /**
+     * Paths of additional split APK copies (App Bundle configs: abi/density/
+     * language splits) stored next to the base APK. Empty for monolithic APKs.
+     * All splits are loaded together with the base — joined dex paths,
+     * joined asset paths and joined native-lib search paths.
+     */
+    val splitApkPaths: List<String> = emptyList(),
     /** Root of the per-clone isolated storage namespace. */
     val storagePath: String,
     /** Optional path of a user supplied custom icon (PNG) inside storagePath. */

@@ -12,14 +12,14 @@ This is **not** a simple APK repackager and **not** a root tool. It is an in-pro
 
 | Area | What it does |
 |---|---|
-| **Import** | Import any installed app (or a standalone APK via SAF). Label, icon, version and signatures are parsed from the APK; the base APK is copied into the clone's private namespace. Split-APK (App Bundle) apps are rejected with an explicit reason. |
+| **Import** | Import any installed app — including **App Bundle / split-APK packages** (base + every `split_config.*` APK is copied) — or standalone files: monolithic APKs and `.xapk` / `.apks` / `.apkm` bundles (auto-unpacked). Label, icon, version are parsed from the base APK; the full APK set lives in the clone's private namespace (splits are always copied, never moved). |
 | **Clones** | Every clone gets a unique numeric id (1, 2, 3 …), its own storage namespace, its own `DexClassLoader`, and its own static-state space. Rename, change icon, duplicate (data copied), enable/disable, delete. |
-| **Isolation** | Per-clone directories: `files/`, `cache/`, `shared_prefs/`, `databases/`, `code_cache/`. `getFilesDir()`, `getCacheDir()`, `openOrCreateDatabase()` and friends are redirected per clone; preferences are strictly namespaced per clone id. |
+| **Isolation** | Per-clone directories: `files/`, `cache/`, `shared_prefs/`, `databases/`, `code_cache/`. `getFilesDir()`, `getCacheDir()`, `openFileInput/Output()`, `openOrCreateDatabase()` and friends are redirected per clone; preferences are strictly namespaced per clone id. |
 | **Launcher UI** | Mini-launcher home: grid of clone icons with numbered badge, live lifecycle dot, search, long-press → options (Launch / Rename / Change icon / Duplicate / Clone info / Add to home / Enable-Disable / Delete), Material You theming. |
-| **Persistence** | Clone registry in Room; settings (theme, fallback behavior, update prefs, Telegram contact) in DataStore. Everything restores after restart: records, icons, names, order, enabled state. |
+| **Persistence** | Clone registry in Room (with v1→v2 migration for split paths); settings (theme, fallback behavior, update prefs, Telegram contact) in DataStore. Everything restores after restart: records, icons, names, order, enabled state — and running clones recover after process death (Recents relaunch rebuilds the runtime). |
 | **Shortcuts** | One distinct launcher shortcut per clone (`clone_<id>`), clone-specific label + badged icon, intent routed through the host to launch the requested instance. Pin-to-home supported. |
 | **Lifecycle** | `CREATED → STARTING → RUNNING → STOPPING → STOPPED` (+ `ERROR`), tracked in memory and persisted, surfaced in the UI. |
-| **Permissions** | Guest dangerous-permission needs are detected from the guest manifest and mediated at HOST level through the standard system dialog — no permission bypass. |
+| **Permissions** | Full host permission battery: camera, microphone, location, storage/media, contacts, calendar, telephony, SMS, Bluetooth, sensors, notifications — declared in the manifest, batch-requested on first run and grantable anytime from Settings → App permissions. Guests inherit the host's grants (they physically run in the host process) — standard system dialogs only, no permission bypass. |
 | **Updates** | In-app updater checks GitHub Releases (`releases/latest`), shows a Material dialog, downloads via system `DownloadManager`, and hands the APK to the standard installer flow. |
 
 ## Architecture

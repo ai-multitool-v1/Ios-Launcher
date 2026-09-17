@@ -202,8 +202,21 @@ class ClonerViewModel(application: Application) : AndroidViewModel(application) 
     fun missingPermissions(clone: CloneInfo): List<String> =
         container.permissions.missingDangerousPermissions(clone)
 
+    /** Batched host battery still missing (requested once for ALL clones). */
+    fun hostPermissionsToRequest(): List<String> =
+        container.permissions.hostRequestPermissions()
+
+    fun hostGrantedCount(): Int = container.permissions.hostGrantedCount()
+
+    fun hostBatchSize(): Int = container.permissions.hostBatchSize()
+
+    fun allHostPermissionsGranted(): Boolean = container.permissions.allHostPermissionsGranted()
+
     fun requestPermissions(activity: android.app.Activity, permissions: List<String>) =
         container.permissions.requestPermissions(activity, permissions)
+
+    fun requestAllHostPermissions(activity: android.app.Activity) =
+        container.permissions.requestAllHostPermissions(activity)
 
     // ------------------------------------------------------------------
     // Settings & updates

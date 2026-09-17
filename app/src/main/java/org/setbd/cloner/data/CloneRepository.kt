@@ -4,6 +4,7 @@ import org.setbd.cloner.core.CloneLifecycleManager
 import org.setbd.cloner.core.VirtualStorageManager
 import org.setbd.cloner.data.db.CloneDao
 import org.setbd.cloner.data.db.CloneEntity
+import org.setbd.cloner.data.db.ClonerDatabase
 import org.setbd.cloner.data.model.CloneInfo
 import org.setbd.cloner.data.model.CloneLifecycle
 import org.setbd.cloner.util.ClonerLog
@@ -31,15 +32,18 @@ class CloneRepository(
     suspend fun cloneCountForPackage(packageName: String): Int = dao.countForPackage(packageName)
 
     /**
-     * Registers an imported APK copy as a new clone. The APK file must already
-     * be stored inside the clone's private directory by the importer.
+     * Registers an imported APK copy as a new clone. The base APK file must
+     * already be staged inside the importer's cache; every split APK (App
+     * Bundle config splits) is copied from wherever it currently lives —
+     * /data/app for installed packages, the staging dir for bundles.
      */
     suspend fun registerClone(
         packageName: String,
         appLabel: String,
         versionName: String,
         apkFile: File,
-        iconPng: ByteArray?
+        iconPng: ByteArray?,
+        splitFiles: List<File> = emptyList()
     ): CloneInfo = withContext(Dispatchers.IO) {
         val index = dao.maxSortOrder()?.plus(1) ?: 0
         val storagePath = storage.createCloneDirs().absolutePath
@@ -47,7 +51,9 @@ class CloneRepository(
             runCatching { storage.writeOriginalIcon(storagePath, iconPng) }
                 .onFailure { ClonerLog.w(TAG, "icon persist failed", it) }
         }
-        val movedApk = storage.relocateApk(storagePath, apkFile)
+        val storedApks = storage.relocateSplitApks(storagePath, apkFile, splitFiles)
+        val movedApk = storedApks.first()
+        val storedSplits = storedApks.drop(1)
         val count = dao.countForPackage(packageName)
         val displayName = if (appLabel.isBlank()) packageName else appLabel
         val entity = CloneEntity(
@@ -55,6 +61,7 @@ class CloneRepository(
             appLabel = appLabel,
             displayName = displayName,
             apkPath = movedApk.absolutePath,
+            splitApkPaths = ClonerDatabase.encodeSplitPaths(storedSplits.map { it.absolutePath }),
             storagePath = storagePath,
             versionName = versionName,
             creationTime = System.currentTimeMillis(),
@@ -113,19 +120,24 @@ class CloneRepository(
     }
 
     /**
-     * Duplicates a clone: new id, fresh storage namespace, APK copied and the
-     * guest data directories cloned so the new instance starts as a copy.
+     * Duplicates a clone: new id, fresh storage namespace, FULL APK set
+     * (base + splits) copied and the guest data directories cloned so the
+     * new instance starts as a copy.
      */
     suspend fun duplicateClone(cloneId: Long): CloneInfo? = withContext(Dispatchers.IO) {
         val source = dao.getById(cloneId) ?: return@withContext null
         val storagePath = storage.createCloneDirs().absolutePath
-        val copiedApk = storage.copyApk(source.apkPath, storagePath)
+        val copiedApk = storage.copyApkSet(source.storagePath, storagePath)
+        val copiedSplits = storage.apkSet(storagePath)
+            .drop(1) // base first, splits after — copyApkSet wrote all, list them
+            .map { it.absolutePath }
         runCatching { storage.copyGuestData(File(source.storagePath), File(storagePath)) }
             .onFailure { ClonerLog.w(TAG, "guest data copy incomplete", it) }
         val index = dao.maxSortOrder()?.plus(1) ?: 0
         val entity = source.copy(
             cloneId = 0L,
             apkPath = copiedApk.absolutePath,
+            splitApkPaths = ClonerDatabase.encodeSplitPaths(copiedSplits),
             storagePath = storagePath,
             displayName = "${source.displayName} (copy)",
             creationTime = System.currentTimeMillis(),
@@ -154,6 +166,7 @@ class CloneRepository(
         appLabel = appLabel,
         displayName = displayName,
         apkPath = apkPath,
+        splitApkPaths = ClonerDatabase.decodeSplitPaths(splitApkPaths),
         storagePath = storagePath,
         customIconPath = customIconPath,
         versionName = versionName,

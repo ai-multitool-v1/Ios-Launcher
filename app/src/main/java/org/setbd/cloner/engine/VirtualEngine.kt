@@ -95,23 +95,55 @@ class VirtualEngine private constructor() {
         runtimes[clone.cloneId]?.let { return it }
         synchronized(this) {
             runtimes[clone.cloneId]?.let { return it }
-            val storageRoot = File(clone.storagePath)
-            val cloneDirName = storageRoot.name
-            val externalRoot = File(
-                appContext.getExternalFilesDir(null) ?: appContext.filesDir,
-                "virtual_apps/$cloneDirName"
-            )
-            val runtime = GuestRuntime(
-                cloneId = clone.cloneId,
-                packageName = clone.originalPackageName,
-                apkPath = clone.apkPath,
-                storageRoot = storageRoot,
-                externalRoot = externalRoot,
-                hostContext = appContext,
-                storage = storage
-            )
+            val runtime = buildRuntime(clone)
             runtimes[clone.cloneId] = runtime
             return runtime
+        }
+    }
+
+    private fun buildRuntime(clone: CloneInfo): GuestRuntime {
+        val storageRoot = File(clone.storagePath)
+        val cloneDirName = storageRoot.name
+        val externalRoot = File(
+            appContext.getExternalFilesDir(null) ?: appContext.filesDir,
+            "virtual_apps/$cloneDirName"
+        )
+        return GuestRuntime(
+            cloneId = clone.cloneId,
+            packageName = clone.originalPackageName,
+            apkPath = clone.apkPath,
+            splitApkPaths = clone.splitApkPaths,
+            storageRoot = storageRoot,
+            externalRoot = externalRoot,
+            hostContext = appContext,
+            storage = storage
+        )
+    }
+
+    /**
+     * Rebuilds a runtime after process death. The host may be killed while a
+     * guest task sits in Recents; when the user taps that task the stub
+     * wrapper arrives with no live runtime. The registry is the source of
+     * truth, so the runtime is rebuilt from it (one short blocking read —
+     * happens at most once per clone per process). Returns null when the
+     * clone no longer exists (deleted while dead).
+     */
+    fun recoverRuntime(cloneId: Long): GuestRuntime? {
+        runtimes[cloneId]?.let { return it }
+        return synchronized(this) {
+            runtimes[cloneId]?.let { return it }
+            val clone = kotlinx.coroutines.runBlocking {
+                runCatching { repository.getClone(cloneId) }.getOrNull()
+            } ?: return null
+            val runtime = try {
+                buildRuntime(clone)
+            } catch (t: Throwable) {
+                ClonerLog.e(TAG, "runtime recovery failed for clone=$cloneId", t)
+                return null
+            }
+            runtimes[cloneId] = runtime
+            ClonerLog.i(TAG, "runtime RECOVERED after process death for clone=$cloneId")
+            runtime
         }
     }
 
@@ -128,9 +160,15 @@ class VirtualEngine private constructor() {
     fun resolveStubLaunch(intent: Intent): Pair<GuestRuntime, String>? {
         if (!intent.hasExtra(ExtraKeys.GUEST_INTENT)) return null
         val cloneId = intent.getLongExtra(ExtraKeys.CLONE_ID, -1L)
-        val runtime = runtimes[cloneId] ?: run {
-            // Restored after process death: rebuild from the registry.
-            return null
+        var runtime = runtimes[cloneId]
+        if (runtime == null) {
+            // Restored after process death: rebuild from the registry so the
+            // Recents task keeps working instead of silently finishing.
+            runtime = recoverRuntime(cloneId)
+            if (runtime == null) {
+                ClonerLog.w(TAG, "no runtime and no registry entry for clone=$cloneId")
+                return null
+            }
         }
         val unwrapped = runtime.unwrapLaunch(intent) ?: return null
         val (guestClassName, _, _) = unwrapped

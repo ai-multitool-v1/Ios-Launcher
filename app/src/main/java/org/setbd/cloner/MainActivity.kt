@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import org.setbd.cloner.core.ShortcutManagerImpl
@@ -20,10 +21,23 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: ClonerViewModel by viewModels()
 
+    /**
+     * Batched host-permission grant. Guest apps run inside this process, so
+     * every clone inherits these grants — one dialog run at first launch,
+     * exactly the standard Android flow, no bypasses.
+     */
+    private val permissionRequest = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val granted = grants.count { it.value }
+        ClonerLog.i("MainActivity", "host permission batch resolved: $granted/${grants.size} granted")
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         handleShortcutIntent(intent)
+        maybeRequestHostPermissions()
         setContent {
             SetbdClonerTheme(themeMode = viewModel.themeMode.value) {
                 MainRoot(viewModel)
@@ -35,6 +49,13 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleShortcutIntent(intent)
+    }
+
+    private fun maybeRequestHostPermissions() {
+        val missing = viewModel.hostPermissionsToRequest()
+        if (missing.isEmpty()) return
+        ClonerLog.i("MainActivity", "requesting ${missing.size} host permissions for guests")
+        permissionRequest.launch(missing.toTypedArray())
     }
 
     private fun handleShortcutIntent(intent: Intent?) {

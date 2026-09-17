@@ -15,6 +15,8 @@ import android.content.res.Resources
 import android.view.Display
 import org.setbd.cloner.util.ClonerLog
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 
 /**
  * ContextWrapper handed to guest code.
@@ -100,9 +102,27 @@ class VirtualContext(
 
     override fun getObbDirs(): Array<File> = arrayOf(getObbDir())
 
+    override fun getDataDir(): File = runtime.storageRoot
+
     override fun getFileStreamPath(name: String): File = File(runtime.filesDir, name)
 
-    override fun openFileInput(name: String) = super.openFileInput(name)
+    /** Reads guest files from the clone's own files directory. */
+    override fun openFileInput(name: String): FileInputStream {
+        val file = File(runtime.filesDir, name)
+        return FileInputStream(file)
+    }
+
+    /** Writes guest files into the clone's own files directory (append-aware). */
+    override fun openFileOutput(name: String, mode: Int): FileOutputStream {
+        val file = File(runtime.filesDir, name)
+        file.parentFile?.mkdirs()
+        return FileOutputStream(file, mode and Context.MODE_APPEND != 0)
+    }
+
+    override fun deleteFile(name: String): Boolean = File(runtime.filesDir, name).delete()
+
+    override fun fileList(): Array<String> =
+        runtime.filesDir.list() ?: arrayOf()
 
     override fun getDir(name: String, mode: Int): File = File(runtime.filesDir, name).apply { mkdirs() }
 

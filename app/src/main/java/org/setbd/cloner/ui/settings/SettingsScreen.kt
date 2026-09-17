@@ -2,6 +2,8 @@ package org.setbd.cloner.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +25,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
@@ -32,6 +35,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -63,6 +67,15 @@ fun SettingsScreen(
     val telegramUrl by viewModel.telegramUrl.collectAsState()
     var showThemePicker by remember { mutableStateOf(false) }
     var showUpdateDialog by remember { mutableStateOf(false) }
+
+    // Runtime permission battery — re-checked on every entry to Settings.
+    var permissionKey by remember { mutableStateOf(0) }
+    val grantAll = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        // Recompose the status row after the dialog resolves.
+        permissionKey++
+    }
 
     val update = (updateState as? ClonerViewModel.UpdateState.Available)?.update
 
@@ -97,6 +110,47 @@ fun SettingsScreen(
                         )
                     }
                     TextButton(onClick = { showThemePicker = true }) { Text("Change") }
+                }
+            }
+
+            SectionCard("App permissions") {
+                key(permissionKey) {
+                    val granted = viewModel.hostGrantedCount()
+                    val total = viewModel.hostBatchSize()
+                    val allGranted = granted >= total
+                    Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    if (allGranted) "All permissions granted" else "Granted $granted of $total",
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                Text(
+                                    "Cloned apps run inside this app and use ITS permissions. " +
+                                        "Grant everything so camera, mic, storage, contacts and " +
+                                        "location work inside every clone.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        if (!allGranted) {
+                            LinearProgressIndicator(
+                                progress = { if (total == 0) 1f else granted.toFloat() / total },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Button(onClick = {
+                                grantAll.launch(viewModel.hostPermissionsToRequest().toTypedArray())
+                            }) {
+                                Text("Grant all permissions")
+                            }
+                        }
+                    }
                 }
             }
 
@@ -171,11 +225,13 @@ fun SettingsScreen(
                 Text(
                     "SETBD Cloner runs supported apps inside its own process with " +
                         "per-clone isolated storage, using only documented Android " +
-                        "mechanisms available to normal apps. It does NOT modify the " +
-                        "system, bypass signatures, defeat Play Integrity, or touch " +
-                        "other apps. Apps that verify their environment, use split " +
-                        "APKs, or rely on guest services/providers may not work — " +
-                        "this is a platform boundary, not a bug.",
+                        "mechanisms available to normal apps. Split-APK (App Bundle) " +
+                        "apps, monolithic APKs and .xapk/.apks bundles are importable. " +
+                        "It does NOT modify the system, bypass signatures, defeat Play " +
+                        "Integrity, or touch other apps. Apps that verify their " +
+                        "environment or rely on guest services/receivers/providers may " +
+                        "have reduced functionality — this is a platform boundary, not " +
+                        "a bug.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             }

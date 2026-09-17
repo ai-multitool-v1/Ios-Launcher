@@ -16,6 +16,8 @@ data class CloneEntity(
     @ColumnInfo(name = "app_label") val appLabel: String,
     @ColumnInfo(name = "display_name") val displayName: String,
     @ColumnInfo(name = "apk_path") val apkPath: String,
+    /** Additional split APK copies (App Bundle splits), "|" separated. */
+    @ColumnInfo(name = "split_apk_paths", defaultValue = "") val splitApkPaths: String = "",
     @ColumnInfo(name = "storage_path") val storagePath: String,
     @ColumnInfo(name = "custom_icon_path") val customIconPath: String? = null,
     @ColumnInfo(name = "version_name") val versionName: String = "",

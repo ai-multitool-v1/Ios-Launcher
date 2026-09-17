@@ -101,10 +101,14 @@ fun ImportScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = { apkPicker.launch("application/vnd.android.package-archive") }) {
+            TextButton(onClick = {
+                // Single picker covering APKs AND split bundles (.xapk/.apks/.apkm
+                // are ZIPs; some file managers serve them as octet-stream or zip).
+                apkPicker.launch("*/*")
+            }) {
                 Icon(Icons.Filled.InstallMobile, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Import from APK file…")
+                Text("Import APK / XAPK / APKS file…")
             }
         }
 

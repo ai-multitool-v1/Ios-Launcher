@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.setbd.cloner.core.CloneLifecycleManager
+import org.setbd.cloner.data.db.ClonerDatabase
 import org.setbd.cloner.data.model.CloneLifecycle
 import org.setbd.cloner.update.UpdateManager
 import org.junit.Test
@@ -64,5 +65,23 @@ class CoreLogicTest {
     @Test
     fun `version comparison ignores non digits`() {
         assertEquals(0, UpdateManager.compareVersions("v1.0.0", "1.0.0"))
+    }
+
+    @Test
+    fun `split apk path encoding round-trips`() {
+        val paths = listOf(
+            "/data/clone_1/apk/base.apk",
+            "/data/clone_1/apk/split_config.arm64_v8a.apk",
+            "/data/clone_1/apk/split_config.xxhdpi.apk"
+        )
+        val encoded = ClonerDatabase.encodeSplitPaths(paths)
+        assertEquals(paths.joinToString("|"), encoded)
+        assertEquals(paths, ClonerDatabase.decodeSplitPaths(encoded))
+    }
+
+    @Test
+    fun `empty split encoding decodes to empty list`() {
+        assertTrue(ClonerDatabase.decodeSplitPaths("").isEmpty())
+        assertTrue(ClonerDatabase.decodeSplitPaths("||").isEmpty())
     }
 }

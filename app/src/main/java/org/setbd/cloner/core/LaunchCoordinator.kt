@@ -56,10 +56,13 @@ class LaunchCoordinator(
         } catch (guest: GuestLoadException) {
             ClonerLog.e(TAG, "clone=${clone.cloneId} cannot virtualize: ${guest.message}", guest)
             lifecycleManager.report(clone.cloneId, CloneLifecycle.ERROR)
+            // Drop the broken runtime so a later retry rebuilds it fresh.
+            engine.unloadRuntime(clone.cloneId)
             handleEngineFailure(clone, guest.message ?: "guest not supported")
         } catch (t: Throwable) {
             ClonerLog.e(TAG, "clone=${clone.cloneId} launch failed", t)
             lifecycleManager.report(clone.cloneId, CloneLifecycle.ERROR)
+            engine.unloadRuntime(clone.cloneId)
             handleEngineFailure(clone, t.message ?: t.javaClass.simpleName)
         }
     }

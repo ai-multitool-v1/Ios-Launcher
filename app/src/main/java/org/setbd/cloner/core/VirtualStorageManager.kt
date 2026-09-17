@@ -61,11 +61,49 @@ class VirtualStorageManager(context: Context) {
         return target
     }
 
+    /**
+     * Moves a freshly imported APK set into the clone's apk directory.
+     *
+     * SAFETY: the base file comes from OUR staging cache and is renamed;
+     * splits may live in /data/app (installed App Bundle packages) and are
+     * ALWAYS copied — the engine never touches system-owned files.
+     * Returns the stored paths, base first, splits in order.
+     */
+    fun relocateSplitApks(storagePath: String, base: File, splits: List<File>): List<File> {
+        val apkDir = File(storagePath, "apk").apply { mkdirs() }
+        val storedBase = relocateApk(storagePath, base)
+        val storedSplits = splits.map { split ->
+            val target = File(apkDir, split.name)
+            split.copyTo(target, overwrite = true)
+            target
+        }
+        return listOf(storedBase) + storedSplits
+    }
+
     fun copyApk(sourceApkPath: String, storagePath: String): File {
         val target = File(storagePath, "apk/base.apk")
         target.parentFile?.mkdirs()
         File(sourceApkPath).copyTo(target, overwrite = true)
         return target
+    }
+
+    /** Copies the full APK set (base + splits) of a clone into a new namespace. */
+    fun copyApkSet(sourceStoragePath: String, targetStoragePath: String): File {
+        val sourceApkDir = File(sourceStoragePath, "apk")
+        val targetApkDir = File(targetStoragePath, "apk").apply { mkdirs() }
+        sourceApkDir.listFiles()?.forEach { file ->
+            file.copyTo(File(targetApkDir, file.name), overwrite = true)
+        }
+        return File(targetApkDir, "base.apk")
+    }
+
+    /** All APK files (base + splits) stored for a clone, base first. */
+    fun apkSet(storagePath: String): List<File> {
+        val apkDir = File(storagePath, "apk")
+        val files = apkDir.listFiles { f -> f.isFile && f.name.endsWith(".apk") } ?: return emptyList()
+        return files.sortedWith(
+            compareByDescending<File> { it.name == "base.apk" }.thenBy { it.name }
+        )
     }
 
     fun writeOriginalIcon(storagePath: String, png: ByteArray) {

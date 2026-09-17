@@ -32,11 +32,17 @@ class GuestLoadException(message: String, cause: Throwable? = null) : Exception(
  * info, the component→stub mapping and the in-flight activity counter. Two
  * clones of the same app each own a separate [GuestRuntime], therefore
  * separate class loaders — their static state never collides.
+ *
+ * Split-APK guests (App Bundle packages) are first-class: base + every split
+ * are joined into ONE dex path, ONE asset path set and ONE native-library
+ * search path — the same way the platform loads installed App Bundle apps.
  */
 class GuestRuntime(
     val cloneId: Long,
     val packageName: String,
     val apkPath: String,
+    /** Additional split APK copies stored next to [apkPath] (may be empty). */
+    val splitApkPaths: List<String> = emptyList(),
     val storageRoot: File,
     val externalRoot: File,
     private val hostContext: android.content.Context,
@@ -52,7 +58,9 @@ class GuestRuntime(
 
     // -- Parsed guest metadata --------------------------------------------
 
-    val packageInfo: PackageInfo
+    /** May be null when the archive metadata could not be parsed but the
+     *  binary manifest was readable — the engine runs manifest-only then. */
+    val packageInfo: PackageInfo?
     val guestApplicationInfo: android.content.pm.ApplicationInfo
     val manifest: ManifestParser.ManifestData
     val launcherActivityClassName: String?
@@ -63,9 +71,16 @@ class GuestRuntime(
     val guestResources: Resources?
     val applicationIcon: Drawable?
 
+    /** Every APK of this guest: base first, then splits (never empty). */
+    val allApkPaths: List<String> =
+        buildList {
+            add(apkPath)
+            addAll(splitApkPaths.filter { it.isNotBlank() && it != apkPath })
+        }
+
     /** Best-effort guest label (resource label resolved against guest APK). */
     val appLabel: String by lazy {
-        GuestResourcesLoader.loadLabel(apkPath, guestApplicationInfo, packageName)
+        GuestResourcesLoader.loadLabel(allApkPaths, guestApplicationInfo, packageName)
     }
 
     var guestApplication: Application? = null
@@ -84,40 +99,69 @@ class GuestRuntime(
 
     init {
         val pm = hostContext.packageManager
-        val parsed = pm.getPackageArchiveInfo(
-            apkPath,
-            PackageManager.GET_META_DATA or PackageManager.GET_SIGNATURES
-        ) ?: throw GuestLoadException("cannot parse guest APK $apkPath")
-
-        manifest = ManifestParser.parse(apkPath, parsed.packageName)
-            ?: throw GuestLoadException("cannot parse guest manifest $apkPath")
-
-        packageInfo = parsed
-
-        val appInfo = parsed.applicationInfo ?: android.content.pm.ApplicationInfo().apply {
-            packageName = parsed.packageName
+        // 1. Archive metadata — best effort. Some APKs fail this parse; the
+        //    binary manifest below is what actually drives the engine.
+        packageInfo = runCatching {
+            pm.getPackageArchiveInfo(
+                apkPath,
+                PackageManager.GET_META_DATA or PackageManager.GET_SIGNATURES or
+                    PackageManager.GET_ACTIVITIES
+            )
+        }.getOrNull()
+        if (packageInfo == null) {
+            ClonerLog.w(TAG, "archive metadata unavailable for $apkPath — manifest-only mode")
         }
+
+        // 2. Binary manifest — MANDATORY. Without it there is nothing to run.
+        manifest = ManifestParser.parse(apkPath, extractManifestPackage())
+            ?: throw GuestLoadException(
+                "cannot read guest manifest of $packageName — APK may be corrupted or protected"
+            )
+
+        val appInfo = packageInfo?.applicationInfo
+            ?: android.content.pm.ApplicationInfo().apply {
+                packageName = extractManifestPackage()
+            }
         // Point every path the guest can observe into its own namespace.
+        appInfo.packageName = packageName
         appInfo.sourceDir = apkPath
         appInfo.publicSourceDir = apkPath
+        appInfo.splitSourceDirs = allApkPaths.drop(1).toTypedArray()
+        appInfo.splitPublicSourceDirs = allApkPaths.drop(1).toTypedArray()
         appInfo.dataDir = storageRoot.absolutePath
         appInfo.deviceProtectedDataDir = storageRoot.absolutePath
-        appInfo.nativeLibraryDir = appInfo.nativeLibraryDir ?: ""
+        if (appInfo.nativeLibraryDir.isNullOrBlank()) {
+            // PathClassLoader locates native libs INSIDE the base/split APKs
+            // (lib/<abi>/*.so entries) automatically on modern Android.
+            appInfo.nativeLibraryDir = odexDir.absolutePath
+        }
         guestApplicationInfo = appInfo
 
-        launcherActivityClassName = manifest.launcherActivity?.className
+        // 3. Launcher entry: MAIN/LAUNCHER filter first, any declared
+        //    activity as a fallback (games sometimes declare the entry point
+        //    only through an activity-alias handled by the parser).
+        launcherActivityClassName = (
+            manifest.launcherActivity
+                ?: manifest.firstActivity
+            )?.className
 
-        val nativeLibPath = appInfo.nativeLibraryDir.takeIf { it.isNotBlank() }
-        classLoader = GuestClassLoader(apkPath, nativeLibPath, hostContext.classLoader)
-        guestResources = GuestResourcesLoader.createResources(hostContext, apkPath)
-        applicationIcon = GuestResourcesLoader.loadIconDrawable(apkPath, appInfo)
+        // 4. Class loading: base + splits on ONE dex path. Zip-embedded
+        //    native libraries are found through the same paths.
+        val dexPath = allApkPaths.joinToString(File.pathSeparator)
+        val nativeLibPath = appInfo.nativeLibraryDir.takeIf { it.isNotBlank() } ?: ""
+        classLoader = GuestClassLoader(dexPath, nativeLibPath, hostContext.classLoader)
+        guestResources = GuestResourcesLoader.createResources(hostContext, allApkPaths)
+        applicationIcon = GuestResourcesLoader.loadIconDrawable(allApkPaths, appInfo)
 
         ClonerLog.i(
             TAG,
             "runtime ready clone=$cloneId pkg=$packageName launcher=$launcherActivityClassName " +
-                "activities=${manifest.activities.size}"
+                "activities=${manifest.activities.size} apks=${allApkPaths.size}"
         )
     }
+
+    private fun extractManifestPackage(): String =
+        packageInfo?.packageName ?: packageName
 
     // ------------------------------------------------------------------
     // Component mapping
@@ -137,14 +181,18 @@ class GuestRuntime(
     }
 
     fun activityInfo(className: String): ActivityInfo? {
-        val fromArchive = packageInfo.activities?.firstOrNull { it.name == className }
+        val fromArchive = packageInfo?.activities?.firstOrNull { it.name == className }
         val manifestActivity = manifest.activities.firstOrNull { it.className == className }
         if (fromArchive == null && manifestActivity == null) return null
         return ActivityInfo().apply {
             name = className
             packageName = this@GuestRuntime.packageName
             applicationInfo = guestApplicationInfo
-            theme = fromArchive?.theme ?: manifestActivity?.themeRes ?: 0
+            // Guest activity theme, falling back to the guest's
+            // application-level theme so AppCompat guests never run themeless.
+            theme = fromArchive?.theme
+                ?: manifestActivity?.themeRes?.takeIf { it != 0 }
+                ?: manifest.applicationThemeRes
             launchMode = when (manifestActivity?.launchMode) {
                 "singleTask" -> android.content.pm.ActivityInfo.LAUNCH_SINGLE_TASK
                 "singleInstance" -> android.content.pm.ActivityInfo.LAUNCH_SINGLE_INSTANCE
@@ -161,7 +209,9 @@ class GuestRuntime(
 
     fun guestLaunchIntent(): Intent {
         val className = launcherActivityClassName
-            ?: throw GuestLoadException("guest $packageName has no launcher activity")
+            ?: throw GuestLoadException(
+                "guest $packageName declares no launchable activity"
+            )
         return Intent(Intent.ACTION_MAIN)
             .addCategory(Intent.CATEGORY_LAUNCHER)
             .setClassName(packageName, className)
