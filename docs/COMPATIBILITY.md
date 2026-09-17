@@ -4,6 +4,10 @@ This document is the engineering ground truth for SETBD Cloner. It exists becaus
 
 ---
 
+## 0.0 v1.2.1 core-engine update (Android 10+ dex policy)
+
+- **Writable-dex enforcement.** Android 10 (API 29) hardened ART: apps targeting API 29+ may no longer execute DEX from a **writable** file — `PathClassLoader` fails with *"Writable dex file '…' is not allowed"*. Every guest APK (base + all splits) is now flipped to read-only (mode 0444) at import time **and** re-enforced at every runtime build. The launch-time enforcement is idempotent and heals clones imported by older versions **in place** — existing clones launch again without re-importing the app. The check ART performs is on the file's permission bits, not its location, so a read-only APK inside the app's private storage is fully compliant.
+
 ## 0. v1.2 core-engine update (launch reliability)
 
 - **Three independent manifest sources.** A launch no longer depends on a single parse: the binary XML manifest, the framework's own `getPackageArchiveInfo` metadata (unaffected by hidden-API enforcement) and the launcher component captured at import time are merged (`ManifestMerger`). Launches die only when NO source yields a runnable entry — previously one failed parse produced "container cannot run this apk".

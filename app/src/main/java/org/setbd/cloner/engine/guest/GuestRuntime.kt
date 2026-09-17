@@ -19,6 +19,7 @@ import org.setbd.cloner.engine.stub.StubActivity
 import org.setbd.cloner.engine.stub.StubSingleInstanceActivity
 import org.setbd.cloner.engine.stub.StubSingleTaskActivity
 import org.setbd.cloner.engine.stub.StubTransparentActivity
+import org.setbd.cloner.util.ApkFileGuard
 import org.setbd.cloner.util.ClonerLog
 import java.io.File
 import java.util.Collections
@@ -167,6 +168,18 @@ class GuestRuntime(
 
         // 5. Class loading: base + splits on ONE dex path. Zip-embedded
         //    native libraries are found through the same paths.
+        // 5a. Android 10+ (targetSdk 29+) refuses to execute DEX from
+        //     writable files — "Writable dex file is not allowed." Flip
+        //     every guest APK to read-only first. Idempotent; also heals
+        //     APK sets imported by older app versions in place.
+        try {
+            ApkFileGuard.enforceReadOnlyPaths(allApkPaths)
+        } catch (t: Throwable) {
+            throw GuestLoadException(
+                "guest APK could not be locked read-only — check storage space and permissions",
+                t
+            )
+        }
         val dexPath = allApkPaths.joinToString(File.pathSeparator)
         val nativeLibPath = appInfo.nativeLibraryDir.takeIf { it.isNotBlank() } ?: ""
         classLoader = GuestClassLoader(dexPath, nativeLibPath, hostContext.classLoader)

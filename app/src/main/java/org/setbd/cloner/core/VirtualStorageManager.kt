@@ -1,6 +1,7 @@
 package org.setbd.cloner.core
 
 import android.content.Context
+import org.setbd.cloner.util.ApkFileGuard
 import org.setbd.cloner.util.ClonerLog
 import java.io.File
 
@@ -58,6 +59,8 @@ class VirtualStorageManager(context: Context) {
             tempApk.copyTo(target, overwrite = true)
             tempApk.delete()
         }
+        // Android 10+ rejects DEX loaded from writable files.
+        ApkFileGuard.enforceReadOnly(listOf(target))
         return target
     }
 
@@ -75,6 +78,8 @@ class VirtualStorageManager(context: Context) {
         val storedSplits = splits.map { split ->
             val target = File(apkDir, split.name)
             split.copyTo(target, overwrite = true)
+            // Same writable-dex policy applies to every split.
+            ApkFileGuard.enforceReadOnly(listOf(target))
             target
         }
         return listOf(storedBase) + storedSplits
@@ -84,6 +89,7 @@ class VirtualStorageManager(context: Context) {
         val target = File(storagePath, "apk/base.apk")
         target.parentFile?.mkdirs()
         File(sourceApkPath).copyTo(target, overwrite = true)
+        ApkFileGuard.enforceReadOnly(listOf(target))
         return target
     }
 
@@ -92,7 +98,8 @@ class VirtualStorageManager(context: Context) {
         val sourceApkDir = File(sourceStoragePath, "apk")
         val targetApkDir = File(targetStoragePath, "apk").apply { mkdirs() }
         sourceApkDir.listFiles()?.forEach { file ->
-            file.copyTo(File(targetApkDir, file.name), overwrite = true)
+            val copied = file.copyTo(File(targetApkDir, file.name), overwrite = true)
+            ApkFileGuard.enforceReadOnly(listOf(copied))
         }
         return File(targetApkDir, "base.apk")
     }
