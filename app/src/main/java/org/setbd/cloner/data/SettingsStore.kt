@@ -34,11 +34,12 @@ class SettingsStore(private val context: Context) {
     }
 
     /**
-     * When the container engine cannot virtualize a guest, the user can allow
-     * a transparent fallback that opens the original installed app instead.
-     * Enabled by default; can be disabled in Settings for strict behavior.
+     * OPT-IN compatibility behavior: when the container engine cannot
+     * virtualize a guest, open the original installed app instead of
+     * showing an explicit error. Disabled by default — the app must never
+     * silently swap itself for the original.
      */
-    val fallbackLaunch: Flow<Boolean> = context.dataStore.data.map { it[Keys.FALLBACK_LAUNCH] ?: true }
+    val fallbackLaunch: Flow<Boolean> = context.dataStore.data.map { it[Keys.FALLBACK_LAUNCH] ?: false }
 
     val autoUpdateCheck: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_UPDATE_CHECK] ?: true }
 

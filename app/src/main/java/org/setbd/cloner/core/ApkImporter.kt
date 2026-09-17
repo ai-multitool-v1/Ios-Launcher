@@ -6,6 +6,7 @@ import android.net.Uri
 import org.setbd.cloner.data.CloneRepository
 import org.setbd.cloner.data.model.CloneInfo
 import org.setbd.cloner.engine.guest.GuestResourcesLoader
+import org.setbd.cloner.engine.guest.ManifestParser
 import org.setbd.cloner.util.BitmapUtils
 import org.setbd.cloner.util.ClonerLog
 import kotlinx.coroutines.Dispatchers
@@ -68,10 +69,16 @@ class ApkImporter(
                 val baseCopy = File(staging, "base.apk")
                 File(sourceApk).copyTo(baseCopy, overwrite = true)
                 val staged = StagedApkSet(baseCopy, emptyList())
+                // Capture the REAL launcher component now — the most robust
+                // entry point the engine can fall back to at launch time.
+                val launcherClass = runCatching {
+                    pm.getLaunchIntentForPackage(packageName)?.component?.className
+                }.getOrNull()
                 registerFromStaged(
                     staged = staged,
                     packageName = packageName,
-                    splitSourceDirs = appInfo.splitSourceDirs?.toList().orEmpty()
+                    splitSourceDirs = appInfo.splitSourceDirs?.toList().orEmpty(),
+                    launcherClass = launcherClass
                 )
             } catch (t: Throwable) {
                 ClonerLog.e(TAG, "import of $packageName failed", t)
@@ -105,7 +112,12 @@ class ApkImporter(
                     "no usable APK inside this bundle — pick a .apk, .xapk, .apks or .apkm file"
                 )
             }
-            registerFromStaged(staged = staged, packageName = null, splitSourceDirs = emptyList())
+            registerFromStaged(
+                staged = staged,
+                packageName = null,
+                splitSourceDirs = emptyList(),
+                launcherClass = null // resolved inside registerFromStaged
+            )
         } catch (t: Throwable) {
             ClonerLog.e(TAG, "APK file import failed", t)
             ImportResult.Error(t.message ?: "import failed")
@@ -117,7 +129,8 @@ class ApkImporter(
     private suspend fun registerFromStaged(
         staged: StagedApkSet,
         packageName: String?,
-        splitSourceDirs: List<String>
+        splitSourceDirs: List<String>,
+        launcherClass: String?
     ): ImportResult {
         val parsed = parseApk(staged.base)
             ?: run {
@@ -132,6 +145,15 @@ class ApkImporter(
             return ImportResult.Error("maximum of $MAX_CLONES_PER_PACKAGE clones for this app")
         }
 
+        // Best-effort launcher for file imports: parse the binary manifest
+        // of the staged base directly. Null is fine — the engine merges this
+        // with the archive metadata at runtime.
+        val resolvedLauncher = launcherClass
+            ?: runCatching {
+                ManifestParser.parse(staged.base.absolutePath, parsed.packageName)
+                    ?.launcherActivity?.className
+            }.getOrNull().orEmpty()
+
         // Stage the full split set next to the base when this is an installed
         // App Bundle package (splits copied straight from /data/app).
         val stagedSplits = staged.splits.ifEmpty {
@@ -143,7 +165,8 @@ class ApkImporter(
             versionName = parsed.versionName,
             apkFile = staged.base,
             splitFiles = stagedSplits,
-            iconPng = parsed.iconPng
+            iconPng = parsed.iconPng,
+            launcherClass = resolvedLauncher
         )
         ClonerLog.i(
             TAG,

@@ -2,6 +2,7 @@ package org.setbd.cloner.engine.stub
 
 import android.app.Activity
 import android.os.Bundle
+import android.widget.Toast
 import org.setbd.cloner.util.ClonerLog
 
 /**
@@ -21,6 +22,13 @@ open class StubActivity : Activity() {
             TAG,
             "stub activity reached directly — engine mapping failed; finishing safely"
         )
+        // Never leave the user staring at a silent black flash: say WHY the
+        // guest did not appear and close cleanly.
+        Toast.makeText(
+            this,
+            "SETBD Cloner: this clone could not be mapped — reopen it from the launcher",
+            Toast.LENGTH_LONG
+        ).show()
         finish()
     }
 

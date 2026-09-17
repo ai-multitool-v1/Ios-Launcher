@@ -157,14 +157,14 @@ fun SettingsScreen(
             SectionCard("Engine behavior") {
                 ToggleRow(
                     title = "Compatibility fallback",
-                    subtitle = "When the container can't virtualize an app, open the original installed app instead (clearly announced).",
+                    subtitle = "OFF (default): failed launches show a clear error. ON: the original installed app is opened instead.",
                     checked = fallback,
                     onChange = { viewModel.setFallbackLaunch(it) }
                 )
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text(
-                    "Disabling makes the engine strict: unsupported apps show an " +
-                        "explicit failure and are never opened outside the container.",
+                    "Recommended to keep OFF — the container engine now starts apps " +
+                        "with three independent manifest sources and never silently opens the original.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )

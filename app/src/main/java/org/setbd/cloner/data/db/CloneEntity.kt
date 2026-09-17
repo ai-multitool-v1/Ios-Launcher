@@ -18,6 +18,8 @@ data class CloneEntity(
     @ColumnInfo(name = "apk_path") val apkPath: String,
     /** Additional split APK copies (App Bundle splits), "|" separated. */
     @ColumnInfo(name = "split_apk_paths", defaultValue = "") val splitApkPaths: String = "",
+    /** Launcher activity class captured at import time (engine last resort). */
+    @ColumnInfo(name = "launcher_class", defaultValue = "") val launcherClass: String = "",
     @ColumnInfo(name = "storage_path") val storagePath: String,
     @ColumnInfo(name = "custom_icon_path") val customIconPath: String? = null,
     @ColumnInfo(name = "version_name") val versionName: String = "",

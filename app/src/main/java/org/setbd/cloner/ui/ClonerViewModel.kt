@@ -35,7 +35,7 @@ class ClonerViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.DARK)
 
     val fallbackLaunch: StateFlow<Boolean> = container.settings.fallbackLaunch
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val autoUpdateCheck: StateFlow<Boolean> = container.settings.autoUpdateCheck
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)

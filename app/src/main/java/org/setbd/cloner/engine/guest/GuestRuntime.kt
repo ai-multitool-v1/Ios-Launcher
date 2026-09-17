@@ -7,10 +7,13 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
+import android.content.Context
 import android.content.res.Resources
 import android.graphics.drawable.Drawable
 import android.os.Bundle
+import android.view.LayoutInflater
 import org.setbd.cloner.core.VirtualStorageManager
+import org.setbd.cloner.engine.hook.GuestInflaterFactory
 import org.setbd.cloner.engine.stub.ExtraKeys
 import org.setbd.cloner.engine.stub.StubActivity
 import org.setbd.cloner.engine.stub.StubSingleInstanceActivity
@@ -43,6 +46,8 @@ class GuestRuntime(
     val apkPath: String,
     /** Additional split APK copies stored next to [apkPath] (may be empty). */
     val splitApkPaths: List<String> = emptyList(),
+    /** Launcher activity captured at import time (last-resort entry point). */
+    val storedLauncherClass: String? = null,
     val storageRoot: File,
     val externalRoot: File,
     private val hostContext: android.content.Context,
@@ -58,11 +63,13 @@ class GuestRuntime(
 
     // -- Parsed guest metadata --------------------------------------------
 
-    /** May be null when the archive metadata could not be parsed but the
-     *  binary manifest was readable — the engine runs manifest-only then. */
+    /** May be null when the framework archive parser could not read the
+     *  APK — the engine then relies on the XML manifest and/or the stored
+     *  launcher captured at import time. */
     val packageInfo: PackageInfo?
     val guestApplicationInfo: android.content.pm.ApplicationInfo
-    val manifest: ManifestParser.ManifestData
+    /** Merged from the XML manifest, archive metadata and stored launcher. */
+    val manifest: ManifestMerger.MergedManifest
     val launcherActivityClassName: String?
 
     // -- Execution environment ---------------------------------------------
@@ -99,8 +106,9 @@ class GuestRuntime(
 
     init {
         val pm = hostContext.packageManager
-        // 1. Archive metadata — best effort. Some APKs fail this parse; the
-        //    binary manifest below is what actually drives the engine.
+        // 1. Framework archive metadata — INDEPENDENT source #1. The
+        //    framework's own parser is unaffected by hidden-API enforcement
+        //    and gives us the application class and every declared activity.
         packageInfo = runCatching {
             pm.getPackageArchiveInfo(
                 apkPath,
@@ -109,13 +117,23 @@ class GuestRuntime(
             )
         }.getOrNull()
         if (packageInfo == null) {
-            ClonerLog.w(TAG, "archive metadata unavailable for $apkPath — manifest-only mode")
+            ClonerLog.w(TAG, "archive metadata unavailable for $apkPath — degraded sources")
+        }
+        val archiveMeta = packageInfo?.toArchiveMeta()
+
+        // 2. Binary XML manifest — source #2. Best effort: failure here no
+        //    longer kills the launch (the archive + stored launcher cover it).
+        val xmlManifest = runCatching {
+            ManifestParser.parse(apkPath, extractManifestPackage())
+        }.getOrNull()
+        if (xmlManifest == null) {
+            ClonerLog.w(TAG, "xml manifest parse failed for $apkPath — merging without it")
         }
 
-        // 2. Binary manifest — MANDATORY. Without it there is nothing to run.
-        manifest = ManifestParser.parse(apkPath, extractManifestPackage())
+        // 3. MERGE the sources. Throws only when NOTHING is runnable.
+        manifest = ManifestMerger.merge(xmlManifest, archiveMeta, storedLauncherClass)
             ?: throw GuestLoadException(
-                "cannot read guest manifest of $packageName — APK may be corrupted or protected"
+                "cannot resolve any launchable entry for $packageName — re-import the app"
             )
 
         val appInfo = packageInfo?.applicationInfo
@@ -130,6 +148,9 @@ class GuestRuntime(
         appInfo.splitPublicSourceDirs = allApkPaths.drop(1).toTypedArray()
         appInfo.dataDir = storageRoot.absolutePath
         appInfo.deviceProtectedDataDir = storageRoot.absolutePath
+        // Restore label/icon resource ids when only the XML saw them.
+        if (appInfo.labelRes == 0 && manifest.labelRes != 0) appInfo.labelRes = manifest.labelRes
+        if (appInfo.icon == 0 && manifest.iconRes != 0) appInfo.icon = manifest.iconRes
         if (appInfo.nativeLibraryDir.isNullOrBlank()) {
             // PathClassLoader locates native libs INSIDE the base/split APKs
             // (lib/<abi>/*.so entries) automatically on modern Android.
@@ -137,15 +158,14 @@ class GuestRuntime(
         }
         guestApplicationInfo = appInfo
 
-        // 3. Launcher entry: MAIN/LAUNCHER filter first, any declared
-        //    activity as a fallback (games sometimes declare the entry point
-        //    only through an activity-alias handled by the parser).
+        // 4. Launch entry — resolved by the merger: XML MAIN/LAUNCHER filter,
+        //    then the import-time stored launcher, then first declared.
         launcherActivityClassName = (
             manifest.launcherActivity
                 ?: manifest.firstActivity
             )?.className
 
-        // 4. Class loading: base + splits on ONE dex path. Zip-embedded
+        // 5. Class loading: base + splits on ONE dex path. Zip-embedded
         //    native libraries are found through the same paths.
         val dexPath = allApkPaths.joinToString(File.pathSeparator)
         val nativeLibPath = appInfo.nativeLibraryDir.takeIf { it.isNotBlank() } ?: ""
@@ -156,12 +176,46 @@ class GuestRuntime(
         ClonerLog.i(
             TAG,
             "runtime ready clone=$cloneId pkg=$packageName launcher=$launcherActivityClassName " +
-                "activities=${manifest.activities.size} apks=${allApkPaths.size}"
+                "activities=${manifest.activities.size} apks=${allApkPaths.size} " +
+                "sources=(xml=${xmlManifest != null},archive=${archiveMeta != null},stored=$storedLauncherClass)"
+        )
+    }
+
+    /** Projects the framework archive parse into merger input. */
+    private fun PackageInfo.toArchiveMeta(): ManifestMerger.ArchiveMeta {
+        val info = this
+        val appInfo = info.applicationInfo
+        return ManifestMerger.ArchiveMeta(
+            applicationClass = appInfo?.className,
+            labelRes = appInfo?.labelRes ?: 0,
+            iconRes = appInfo?.icon ?: 0,
+            applicationThemeRes = appInfo?.theme ?: 0,
+            activities = info.activities.orEmpty().map { a ->
+                ManifestMerger.ArchiveActivity(
+                    className = a.name,
+                    themeRes = a.theme,
+                    launchMode = when (a.launchMode) {
+                        ActivityInfo.LAUNCH_SINGLE_TASK -> "singleTask"
+                        ActivityInfo.LAUNCH_SINGLE_INSTANCE -> "singleInstance"
+                        ActivityInfo.LAUNCH_SINGLE_TOP -> "singleTop"
+                        else -> "standard"
+                    }
+                )
+            }
         )
     }
 
     private fun extractManifestPackage(): String =
         packageInfo?.packageName ?: packageName
+
+    /**
+     * Guest-bound LayoutInflater served through VirtualContext for
+     * LAYOUT_INFLATER_SERVICE. Built directly on the given (virtual)
+     * context — never via LayoutInflater.from, which would recurse back
+     * into this service lookup.
+     */
+    fun guestLayoutInflater(context: Context): LayoutInflater =
+        GuestInflaterFactory.create(guestContext = context)
 
     // ------------------------------------------------------------------
     // Component mapping

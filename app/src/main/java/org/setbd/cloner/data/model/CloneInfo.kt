@@ -22,6 +22,12 @@ data class CloneInfo(
      * joined asset paths and joined native-lib search paths.
      */
     val splitApkPaths: List<String> = emptyList(),
+    /**
+     * Launcher activity class captured at import time. The engine's last
+     * resort entry point when neither the XML manifest nor the framework
+     * archive parse yield a launchable activity.
+     */
+    val launcherClass: String = "",
     /** Root of the per-clone isolated storage namespace. */
     val storagePath: String,
     /** Optional path of a user supplied custom icon (PNG) inside storagePath. */

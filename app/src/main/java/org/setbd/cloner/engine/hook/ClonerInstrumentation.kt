@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.os.Bundle
+import android.view.LayoutInflater
 import org.setbd.cloner.engine.VirtualEngine
 import org.setbd.cloner.engine.guest.VirtualContext
 import org.setbd.cloner.util.ClonerLog
@@ -125,6 +126,12 @@ class ClonerInstrumentation : Instrumentation() {
                 swapDeclaredField(activity, "mApplication", app)
             }
 
+            // 5. Window LayoutInflater → guest-bound. Guest custom views in
+            //    XML layouts resolve through the guest class loader (the
+            //    window's stock inflater carries the HOST ContextImpl and
+            //    would crash every non-framework view class).
+            swapWindowInflater(activity, virtualContext)
+
             ClonerLog.d(TAG, "guest environment attached clone=${runtime.cloneId} activity=$guestClassName")
         } catch (t: Throwable) {
             ClonerLog.e(TAG, "guest environment attach failed clone=${runtime.cloneId}", t)
@@ -138,6 +145,28 @@ class ClonerInstrumentation : Instrumentation() {
     } catch (t: Throwable) {
         ClonerLog.e(TAG, "cannot read activity base context", t)
         null
+    }
+
+    /**
+     * Replaces PhoneWindow.mLayoutInflater with a guest-bound inflater.
+     * The activity itself is wired as the private Factory2 so fragment
+     * view creation keeps routing correctly. Best-effort by design.
+     */
+    private fun swapWindowInflater(activity: Activity, guestContext: Context) {
+        runCatching {
+            val window = Activity::class.java.getDeclaredField("mWindow").apply {
+                isAccessible = true
+            }.get(activity) ?: return
+            val guestInflater = GuestInflaterFactory.create(
+                guestContext = guestContext,
+                privateFactory = activity as? LayoutInflater.Factory2
+            )
+            window.javaClass.getDeclaredField("mLayoutInflater").apply {
+                isAccessible = true
+            }.set(window, guestInflater)
+        }.onFailure {
+            ClonerLog.w(TAG, "window inflater swap failed — guest custom views may crash", it)
+        }
     }
 
     private fun swapDeclaredField(target: Any, fieldName: String, value: Any?): Boolean {

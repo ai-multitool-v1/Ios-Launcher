@@ -4,7 +4,15 @@ This document is the engineering ground truth for SETBD Cloner. It exists becaus
 
 ---
 
-## 0. v1.1 core-engine update
+## 0. v1.2 core-engine update (launch reliability)
+
+- **Three independent manifest sources.** A launch no longer depends on a single parse: the binary XML manifest, the framework's own `getPackageArchiveInfo` metadata (unaffected by hidden-API enforcement) and the launcher component captured at import time are merged (`ManifestMerger`). Launches die only when NO source yields a runnable entry — previously one failed parse produced "container cannot run this apk".
+- **Import-time launcher capture.** Installed-app imports store the real launcher component (`getLaunchIntentForPackage`) in the registry (DB v3); file imports resolve it from the manifest. Even with both manifest parsers dead, a stored launcher still starts the guest with sensible defaults.
+- **Guest-bound LayoutInflater.** Guest activities now run with a `PhoneLayoutInflater` built on the virtual context (window + `LAYOUT_INFLATER_SERVICE` paths). Custom view classes declared in guest layouts resolve through the guest class loader — previously every non-framework view crashed inflation; the activity is also wired as the private Factory2 so fragment view creation keeps routing.
+- **No silent original-app fallback.** Failed launches show an explicit, actionable error by default. Opening the original app is now opt-in ("Compatibility fallback" in Settings, default OFF) — the app never quietly swaps itself for the original.
+- **Diagnostics.** When a stub mapping fails the stub explains itself via toast instead of a silent black flash; launch errors carry user-readable reasons.
+
+## 0.1 v1.1 core-engine update
 
 - **Split-APK (App Bundle) support.** Installed App Bundle packages are imported as base + **all** split APKs (`split_config.*.abi/density/language`); splits are copied into the clone namespace and loaded together with the base (joined dex path, joined asset paths, zip-embedded native-lib lookup). `.xapk` / `.apks` / `.apkm` bundles picked from storage are unpacked and imported the same way.
 - **Permission battery.** The host declares and batch-requests every grantable runtime permission; guests run inside the host process and inherit the grants (camera, microphone, location, storage/media, contacts, telephony, SMS, Bluetooth, sensors, notifications…).

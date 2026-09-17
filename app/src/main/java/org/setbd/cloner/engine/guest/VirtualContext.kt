@@ -242,6 +242,11 @@ class VirtualContext(
     // ------------------------------------------------------------------
 
     override fun getSystemService(name: String): Any? {
+        if (name == Context.LAYOUT_INFLATER_SERVICE) {
+            // Guest-bound inflater: view classes named in guest layouts
+            // (custom views) resolve through the guest class loader.
+            return runtime.guestLayoutInflater(this)
+        }
         return super.getSystemService(name)
     }
 

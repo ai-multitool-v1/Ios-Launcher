@@ -43,7 +43,8 @@ class CloneRepository(
         versionName: String,
         apkFile: File,
         iconPng: ByteArray?,
-        splitFiles: List<File> = emptyList()
+        splitFiles: List<File> = emptyList(),
+        launcherClass: String = ""
     ): CloneInfo = withContext(Dispatchers.IO) {
         val index = dao.maxSortOrder()?.plus(1) ?: 0
         val storagePath = storage.createCloneDirs().absolutePath
@@ -62,6 +63,7 @@ class CloneRepository(
             displayName = displayName,
             apkPath = movedApk.absolutePath,
             splitApkPaths = ClonerDatabase.encodeSplitPaths(storedSplits.map { it.absolutePath }),
+            launcherClass = launcherClass.orEmpty(),
             storagePath = storagePath,
             versionName = versionName,
             creationTime = System.currentTimeMillis(),
@@ -167,6 +169,7 @@ class CloneRepository(
         displayName = displayName,
         apkPath = apkPath,
         splitApkPaths = ClonerDatabase.decodeSplitPaths(splitApkPaths),
+        launcherClass = launcherClass,
         storagePath = storagePath,
         customIconPath = customIconPath,
         versionName = versionName,

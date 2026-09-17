@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [CloneEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class ClonerDatabase : RoomDatabase() {
@@ -29,6 +29,15 @@ abstract class ClonerDatabase : RoomDatabase() {
             }
         }
 
+        /** v2 → v3: import-time launcher capture (robust engine entry). */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE clones ADD COLUMN launcher_class TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
+
         fun get(context: Context): ClonerDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -36,7 +45,7 @@ abstract class ClonerDatabase : RoomDatabase() {
                     ClonerDatabase::class.java,
                     "setbd_cloner.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }

@@ -14,7 +14,7 @@ import org.setbd.cloner.util.ClonerLog
 /** Result of a clone launch attempt. */
 sealed class LaunchResult {
     data object Started : LaunchResult()
-    /** Engine failed; user was transparently routed to the original app. */
+    /** Engine failed; the user explicitly enabled opening the original app. */
     data object FallbackStarted : LaunchResult()
     data class Failed(val reason: String) : LaunchResult()
 }
@@ -23,11 +23,12 @@ sealed class LaunchResult {
  * Decides HOW a clone is started.
  *
  * Primary path: the container engine loads the guest APK into this process.
- * When the engine cannot run a guest (unparsable APK, unsupported construct,
- * hidden-API failure…) the user setting decides between an explicit error or
- * a clearly-labelled compatibility fallback that opens the ORIGINAL installed
- * app. The fallback is honest: it never pretends to be virtualized — a toast
- * tells the user what happened, and the clone is marked degraded.
+ * When the engine cannot run a guest the DEFAULT behavior is an explicit
+ * failure with a clear, actionable reason — the app NEVER silently swaps
+ * itself for the original (that default confused users into thinking the
+ * clone "worked" while actually opening the original). Only when the user
+ * turns on "Compatibility mode" in Settings does a failure additionally
+ * open the original installed app, clearly labelled.
  */
 class LaunchCoordinator(
     private val context: Context,
@@ -67,20 +68,34 @@ class LaunchCoordinator(
         }
     }
 
-    private suspend fun handleEngineFailure(clone: CloneInfo, reason: String): LaunchResult {
+    private suspend fun handleEngineFailure(clone: CloneInfo, rawReason: String): LaunchResult {
         val fallbackAllowed = settings.currentFallbackLaunch()
-        val original = context.packageManager.getLaunchIntentForPackage(clone.originalPackageName)
-        if (fallbackAllowed && original != null) {
-            Toast.makeText(
-                context,
-                "Container can't run this app — opening original (compatibility mode)",
-                Toast.LENGTH_LONG
-            ).show()
-            context.startActivity(original.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            lifecycleManager.report(clone.cloneId, CloneLifecycle.RUNNING)
-            return LaunchResult.FallbackStarted
+        if (fallbackAllowed) {
+            val original = context.packageManager.getLaunchIntentForPackage(clone.originalPackageName)
+            if (original != null) {
+                Toast.makeText(
+                    context,
+                    "Clone engine failed — opening original (compatibility mode)",
+                    Toast.LENGTH_LONG
+                ).show()
+                context.startActivity(original.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                lifecycleManager.report(clone.cloneId, CloneLifecycle.RUNNING)
+                return LaunchResult.FallbackStarted
+            }
         }
-        return LaunchResult.Failed(reason)
+        return LaunchResult.Failed(friendlyReason(rawReason))
+    }
+
+    /** Translates engine jargon into user-actionable messages. */
+    private fun friendlyReason(raw: String): String {
+        val lowered = raw.lowercase()
+        return when {
+            "launchable entry" in lowered || "manifest" in lowered ->
+                "The clone APK could not be read. Delete this clone and import the app again."
+            "component" in lowered ->
+                "The clone's entry point is missing. Delete this clone and import the app again."
+            else -> "Engine error: $raw"
+        }
     }
 
     private companion object {

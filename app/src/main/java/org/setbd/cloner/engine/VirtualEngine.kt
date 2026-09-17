@@ -113,6 +113,7 @@ class VirtualEngine private constructor() {
             packageName = clone.originalPackageName,
             apkPath = clone.apkPath,
             splitApkPaths = clone.splitApkPaths,
+            storedLauncherClass = clone.launcherClass.takeIf { it.isNotBlank() },
             storageRoot = storageRoot,
             externalRoot = externalRoot,
             hostContext = appContext,
